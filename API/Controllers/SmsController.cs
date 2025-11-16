@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using SmsEngine.Application.Interfaces;
 using SmsEngine.Domain.Entities;
+using SmsEngine.Application.DTOs.Requests;
 
 namespace SmsEngine.API.Controllers;
 
@@ -18,18 +19,12 @@ public class SmsController : ControllerBase
     }
 
     [HttpPost("single")]
-    public async Task<IActionResult> SendSms([FromBody] SmsMessageRequest request)
+    public async Task<IActionResult> SendSms([FromBody] SingleSmsMessageRequest request)
     {
         try
         {
-            var message = new SmsMessage
-            {
-                To = request.PhoneNumber,
-                Body = request.Message,
-                ReferenceId = request.ReferenceId
-            };
 
-            var result = await _smsService.SendSmsAsync(message);
+            var result = await _smsService.SendSmsAsync(request);
             return result.Success 
                 ? Ok(new { Success = true, ReferenceId = result.ReferenceId, Message = result.Message })
                 : BadRequest(new { Success = false, result.Message });
@@ -46,16 +41,9 @@ public class SmsController : ControllerBase
     {
         try
         {
-            var messages = request.Recipients.Select(r => new SmsMessage
-            {
-                To = r.PhoneNumber,
-                Body = r.Message ?? request.Message,
-                ReferenceId = r.ReferenceId
-            });
-
-            var result = await _smsService.SendBulkSmsAsync(messages);
+            var result = await _smsService.SendBulkSmsAsync(request);
             return result.Success
-                ? Ok(new { Success = true, ReferenceIds = result.ReferenceIds, Message = result.Message })
+                ? Ok(new { Success = true, ReferenceIds = result.ReferenceId, Message = result.Message })
                 : BadRequest(new { Success = false, result.Message });
         }
         catch (Exception ex)
@@ -70,17 +58,7 @@ public class SmsController : ControllerBase
     {
         try
         {
-            var messages = request.Messages.ToDictionary(
-                m => m.PhoneNumber,
-                m => new SmsMessage
-                {
-                    To = m.PhoneNumber,
-                    Body = m.Message,
-                    ReferenceId = m.ReferenceId
-                }
-            );
-
-            var result = await _smsService.SendDynamicSmsAsync(messages);
+            var result = await _smsService.SendDynamicSmsAsync(request);
             return result.Success
                 ? Ok(new { Success = true, ReferenceIds = result.ReferenceIds, Message = result.Message })
                 : BadRequest(new { Success = false, result.Message });
@@ -91,37 +69,4 @@ public class SmsController : ControllerBase
             return StatusCode(500, new { Success = false, Message = "An error occurred while sending dynamic SMS" });
         }
     }
-}
-
-// Request DTOs
-public class SmsMessageRequest
-{
-    public required string PhoneNumber { get; set; }
-    public required string Message { get; set; }
-    public string? ReferenceId { get; set; }
-}
-
-public class BulkSmsRequest
-{
-    public required IEnumerable<Recipient> Recipients { get; set; }
-    public string? Message { get; set; }
-}
-
-public class DynamicSmsRequest
-{
-    public required IEnumerable<DynamicMessage> Messages { get; set; }
-}
-
-public class Recipient
-{
-    public required string PhoneNumber { get; set; }
-    public string? Message { get; set; }
-    public string? ReferenceId { get; set; }
-}
-
-public class DynamicMessage
-{
-    public required string PhoneNumber { get; set; }
-    public required string Message { get; set; }
-    public string? ReferenceId { get; set; }
 }

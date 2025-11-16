@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SmsEngine.Application.DTOs;
+using SmsEngine.Application.DTOs.Requests;
 using SmsEngine.Application.Interfaces;
 using SmsEngine.Domain.Entities;
 using SmsEngine.Infrastructure.Configuration;
@@ -25,7 +26,7 @@ public class SslWirelessSmsService : ISmsService
         _smsSettings = smsSettings.Value;
     }
 
-    public async Task<SmsResult> SendSmsAsync(SmsMessage message, CancellationToken cancellationToken = default)
+    public async Task<SmsResult> SendSmsAsync(SingleSmsMessageRequest message)
     {
         try
         {
@@ -34,61 +35,56 @@ public class SslWirelessSmsService : ISmsService
             {
                 api_token = _smsSettings.ApiToken,
                 sid = _smsSettings.Sid,
-                msisdn = message.To,
-                sms = message.Body,
-                csms_id = message.ReferenceId ?? $"sms_{DateTime.Now:yyyyMMdd}"
+                msisdn = message.PhoneNumber,
+                sms = message.Message,
+                csms_id = $"sms_{DateTime.Now:yyyyMMdd}"
             };
 
-            var response = await client.PostAsJsonAsync($"{_smsSettings.BaseUrl}/send-sms", request, cancellationToken);
+            var response = await client.PostAsJsonAsync($"{_smsSettings.BaseUrl}/send-sms", request);
             response.EnsureSuccessStatusCode();
-
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(content);
 
             return new SmsResult(true, "SMS sent successfully", request.csms_id);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending SMS to {PhoneNumber}", message.To);
+            _logger.LogError(ex, "Error sending SMS to {PhoneNumber}", message.PhoneNumber);
             return new SmsResult(false, ex.Message);
         }
     }
 
-    public async Task<BulkSmsResult> SendBulkSmsAsync(IEnumerable<SmsMessage> messages, CancellationToken cancellationToken = default)
+    public async Task<BulkSmsResult> SendBulkSmsAsync(BulkSmsRequest messages)
     {
-        var referenceIds = new List<string>();
+        string referenceId = null;
         var batchId = $"bulk_{DateTime.Now:yyyyMMddHHmmss}";
 
         try
         {
             var client = _httpClientFactory.CreateClient();
+
             var request = new
             {
                 api_token = _smsSettings.ApiToken,
                 sid = _smsSettings.Sid,
-                sms = messages.Select((m, i) => new
-                {
-                    msisdn = m.To,
-                    sms = m.Body,
-                    csms_id = m.ReferenceId ?? $"{batchId}_{i:D4}"
-                }),
-                batch_csms_id = batchId
+                sms= messages.Message,
+                batch_csms_id = batchId,
+                msisdn = messages.Recipients.ToList()
+
             };
 
-            var response = await client.PostAsJsonAsync($"{_smsSettings.BaseUrl}/send-sms/bulk", request, cancellationToken);
+            var response = await client.PostAsJsonAsync($"{_smsSettings.BaseUrl}/send-sms/bulk", request);
             response.EnsureSuccessStatusCode();
 
-            referenceIds = request.sms.Select(x => x.csms_id).ToList();
-            return new BulkSmsResult(true, referenceIds, "Bulk SMS sent successfully");
+            referenceId = request.batch_csms_id;
+            return new BulkSmsResult(true, referenceId.ToString(), "Bulk SMS sent successfully");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error sending bulk SMS");
-            return new BulkSmsResult(false, referenceIds, ex.Message);
+            return new BulkSmsResult(false, referenceId.ToString(), ex.Message);
         }
     }
 
-    public async Task<DynamicSmsResult> SendDynamicSmsAsync(Dictionary<string, SmsMessage> messages, CancellationToken cancellationToken = default)
+    public async Task<DynamicSmsResult> SendDynamicSmsAsync(DynamicSmsRequest messages)
     {
         var referenceIds = new Dictionary<string, string>();
         var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
@@ -96,12 +92,14 @@ public class SslWirelessSmsService : ISmsService
         try
         {
             var client = _httpClientFactory.CreateClient();
-            var smsList = messages.Select((kvp, i) => new
-            {
-                msisdn = kvp.Key,
-                text = kvp.Value.Body,
-                csms_id = $"dyn_{timestamp}_{i:D4}"
-            }).ToList();
+
+            var smsList = messages.Messages
+             .Select((msg, i) => new
+             {
+                 msisdn = msg.PhoneNumber,
+                 text = msg.Message,
+                 csms_id = $"d{timestamp}{i:D4}" // 16 char max
+             }).ToList();
 
             var request = new
             {
@@ -110,7 +108,7 @@ public class SslWirelessSmsService : ISmsService
                 sms = smsList
             };
 
-            var response = await client.PostAsJsonAsync($"{_smsSettings.BaseUrl}/send-sms/dynamic", request, cancellationToken);
+            var response = await client.PostAsJsonAsync($"{_smsSettings.BaseUrl}/send-sms/dynamic", request);
             response.EnsureSuccessStatusCode();
 
             referenceIds = smsList.ToDictionary(
