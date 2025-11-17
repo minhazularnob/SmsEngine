@@ -1,5 +1,5 @@
-using Microsoft.OpenApi.Models;
-using SmsEngine.API.Controllers;
+﻿using Microsoft.OpenApi.Models;
+using Serilog;
 using SmsEngine.Application.Interfaces;
 using SmsEngine.Infrastructure.Configuration;
 using SmsEngine.Infrastructure.Services;
@@ -23,8 +23,19 @@ builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection(SmsSett
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<ISmsService, SslWirelessSmsService>();
 
-// Add logging
-builder.Services.AddLogging(configure => configure.AddConsole());
+// Serilog configure
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console()   
+    .WriteTo.File(
+        path: "log/log-.txt",
+        rollingInterval: RollingInterval.Day,
+        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+    )
+    .CreateLogger();
+
+// ASP.NET Core logging system কে Serilog দিয়ে ব্যবহার করো
+builder.Host.UseSerilog();
 
 var app = builder.Build();
 

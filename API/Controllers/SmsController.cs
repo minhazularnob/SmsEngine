@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
-using SmsEngine.Application.Interfaces;
-using SmsEngine.Domain.Entities;
+using SmsEngine.Application.DTOs;
 using SmsEngine.Application.DTOs.Requests;
+using SmsEngine.Application.Interfaces;
+using Serilog;
 
 namespace SmsEngine.API.Controllers;
 
@@ -10,63 +11,111 @@ namespace SmsEngine.API.Controllers;
 public class SmsController : ControllerBase
 {
     private readonly ISmsService _smsService;
-    private readonly ILogger<SmsController> _logger;
 
     public SmsController(ISmsService smsService, ILogger<SmsController> logger)
     {
         _smsService = smsService;
-        _logger = logger;
     }
-
+       
     [HttpPost("single")]
-    public async Task<IActionResult> SendSms([FromBody] SingleSmsMessageRequest request)
+    public async Task<ActionResult<SingleSmsResult>> SendSingleSms([FromBody] SingleSmsMessageRequest request)
     {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
         try
         {
+            var result = await _smsService.SendSingleSmsAsync(request);
 
-            var result = await _smsService.SendSmsAsync(request);
-            return result.Success 
-                ? Ok(new { Success = true, ReferenceId = result.ReferenceId, Message = result.Message })
-                : BadRequest(new { Success = false, result.Message });
+            if (!result.Success)
+            {
+                // FAILED means bad request (invalid number, blocked, insufficient balance etc.)
+                return BadRequest(result);
+            }
+
+            return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending SMS to {PhoneNumber}", request.PhoneNumber);
-            return StatusCode(500, new { Success = false, Message = "An error occurred while sending SMS" });
+            Log.Error(ex, "Unexpected error while sending SMS to {PhoneNumber}", request.PhoneNumber);
+            return StatusCode(500, new SingleSmsResult
+            {
+                
+                Success = false,
+                Status = "ERROR",
+                Message = "Internal server error"
+            });
         }
     }
 
     [HttpPost("bulk")]
-    public async Task<IActionResult> SendBulkSms([FromBody] BulkSmsRequest request)
+    public async Task<ActionResult<BulkSmsResult>> SendBulkSms([FromBody] BulkSmsRequest request)
     {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
         try
         {
             var result = await _smsService.SendBulkSmsAsync(request);
-            return result.Success
-                ? Ok(new { Success = true, ReferenceIds = result.ReferenceId, Message = result.Message })
-                : BadRequest(new { Success = false, result.Message });
+
+            // Partial success/failure: always return 200, include details in Items
+            return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending bulk SMS");
-            return StatusCode(500, new { Success = false, Message = "An error occurred while sending bulk SMS" });
+            Log.Error(ex, "Unexpected error while sending bulk SMS");
+            var batchId = $"bulk_{Guid.NewGuid():N}";
+
+            var errorResult = new BulkSmsResult
+            {
+                Status = "FAILED",
+                Success = false,
+                Message = "Internal server error while sending bulk SMS",
+                BatchId = batchId,
+                Items = request.Recipients.Select(r => new BulkSmsItem
+                {
+                    PhoneNumber = r.PhoneNumber,
+                    Status = "ERROR",
+                    Message = ex.Message
+                }).ToList()
+            };
+
+            return StatusCode(500, errorResult);
         }
     }
 
     [HttpPost("dynamic")]
-    public async Task<IActionResult> SendDynamicSms([FromBody] DynamicSmsRequest request)
+    public async Task<ActionResult<DynamicSmsResult>> SendDynamicSms([FromBody] DynamicSmsRequest request)
     {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
         try
         {
             var result = await _smsService.SendDynamicSmsAsync(request);
-            return result.Success
-                ? Ok(new { Success = true, ReferenceIds = result.ReferenceIds, Message = result.Message })
-                : BadRequest(new { Success = false, result.Message });
+            
+            return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending dynamic SMS");
-            return StatusCode(500, new { Success = false, Message = "An error occurred while sending dynamic SMS" });
+            Log.Error(ex, "Error sending dynamic SMS");
+
+            var batchId = $"dyn_{Guid.NewGuid():N}";
+
+            var errorResult = new DynamicSmsResult
+            {
+                Status = "FAILED",
+                Message = "Internal server error while sending dynamic SMS",
+                Items = request.Messages.Select((m, i) => new DynamicSmsItem
+                {
+                    PhoneNumber = m.PhoneNumber,
+                    CsmsId = $"d{batchId}_{i:D4}",
+                    SmsStatus = "ERROR",
+                    StatusMessage = ex.Message
+                }).ToList()
+            };
+
+            return StatusCode(500, errorResult);
         }
     }
 }
