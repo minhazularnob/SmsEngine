@@ -34,7 +34,6 @@ Log.Logger = new LoggerConfiguration()
     )
     .CreateLogger();
 
-// ASP.NET Core logging system কে Serilog দিয়ে ব্যবহার করো
 builder.Host.UseSerilog();
 
 var app = builder.Build();

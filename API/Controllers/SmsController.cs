@@ -40,7 +40,6 @@ public class SmsController : ControllerBase
             Log.Error(ex, "Unexpected error while sending SMS to {PhoneNumber}", request.PhoneNumber);
             return StatusCode(500, new SingleSmsResult
             {
-                
                 Success = false,
                 Status = "ERROR",
                 Message = "Internal server error"

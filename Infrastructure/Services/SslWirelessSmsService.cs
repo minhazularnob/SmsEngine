@@ -70,7 +70,7 @@ public class SslWirelessSmsService : ISmsService
 
             return new SingleSmsResult
             {
-                Status = smsStatus ?? result.Status,
+                Status = result.Status,
                 Success = isSuccess,
                 Message = isSuccess ? statusMsg ?? "SMS sent successfully" : result.ErrorMessage,
                 ReferenceId = referenceId,
